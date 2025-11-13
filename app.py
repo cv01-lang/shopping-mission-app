@@ -85,29 +85,17 @@ GLOBAL_CSS = """
   border: 1px solid #f1f3f5;
   background: #fff;
 }
-
-/* 결과 페이지 그리드 (썸네일 리스트) */
-.result-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 12px;
-}
-.result-card {
-  border: 1px solid #e9ecef;
-  border-radius: 12px;
-  padding: 10px;
-  background: #fff;
-}
-.result-thumb-box {
-  width: 100%;
-  height: 150px;
-  display: flex; align-items: center; justify-content: center;
-  overflow: hidden; border-radius: 8px; background: #fafafa; border: 1px solid #f1f3f5;
-}
-.result-thumb-box img { max-width: 100%; max-height: 100%; object-fit: contain; }
 </style>
 """
 st.markdown(GLOBAL_CSS, unsafe_allow_html=True)
+
+# st.html 헬퍼: 없으면 markdown 폴백
+def render_html(html: str):
+    try:
+        # Streamlit 1.32+ 에서 제공
+        st.html(html)
+    except AttributeError:
+        st.markdown(html, unsafe_allow_html=True)
 
 # -----------------------------
 # 유틸 함수
@@ -174,7 +162,7 @@ def get_font(prefer_size=32):
     한글 폰트 우선순위: 프로젝트 내 NanumHumanRegular.ttf 사용 (요청사항)
     """
     candidates = [
-        "fonts/NanumHumanRegular.ttf",   # 요청하신 폰트
+        "fonts/NanumHumanRegular.ttf",   # 요청 폰트
         "fonts/NotoSansCJK-Regular.otf",
         "fonts/NotoSansKR-Regular.otf",
         "fonts/NanumGothic.ttf",
@@ -330,16 +318,13 @@ def start_page():
 
     st.info("예: 카레 만들기, 여름캠핑, 생일파티 등 다양한 상황에서 필요한 물건을 골라 보세요!")
 
-def _render_product_cards(df_slice: pd.DataFrame):
-    """
-    HTML 기반 3열 카드 렌더링 (이미지는 <img>로 로딩, Streamlit 이미지 처리 X)
-    """
-    cards_html = ['<div class="product-grid">']
+def _product_cards_html(df_slice: pd.DataFrame) -> str:
+    cards = ['<div class="product-grid">']
     for _, row in df_slice.iterrows():
         name = str(row["품명"])
         price = int(row["가격"])
         img = str(row["이미지url"])
-        card = f"""
+        cards.append(f"""
         <div class="product-card">
           <div class="product-title">{name}</div>
           <div class="product-img-wrap">
@@ -347,10 +332,12 @@ def _render_product_cards(df_slice: pd.DataFrame):
           </div>
           <div class="product-price">{format_won(price)}</div>
         </div>
-        """
-        cards_html.append(card)
-    cards_html.append("</div>")
-    st.markdown("\n".join(cards_html), unsafe_allow_html=True)
+        """)
+    cards.append("</div>")
+    return "\n".join(cards)
+
+def _render_product_cards(df_slice: pd.DataFrame):
+    render_html(_product_cards_html(df_slice))
 
 def _render_cart_table_html(cart: Dict[str, Dict[str, Any]]):
     rows = []
@@ -380,23 +367,22 @@ def _render_cart_table_html(cart: Dict[str, Dict[str, Any]]):
       </tbody>
     </table>
     """
-    st.markdown(html, unsafe_allow_html=True)
+    render_html(html)
 
 def shop_page(df: pd.DataFrame):
     st.title(f"🛍️ 쇼핑 - 미션: {st.session_state.mission}")
     st.caption(f"예산: {format_won(st.session_state.budget)}")
 
-    # 3열 그리드: Streamlit 위젯(수량/버튼)은 제품 단위로 렌더되므로 행 단위로 처리
+    # 3열 그리드: 행 단위로 처리
     n_cols = 3
     rows = math.ceil(len(df) / n_cols)
 
     for r in range(rows):
-        # 현재 행의 3개 상품 슬라이스
         start = r * n_cols
         end = min((r + 1) * n_cols, len(df))
         df_slice = df.iloc[start:end]
 
-        # 먼저 HTML 카드 3개 묶어서 출력 (고정 높이 카드 & HTML 이미지)
+        # HTML 카드 묶음 출력 (고정 높이 & HTML 이미지)
         _render_product_cards(df_slice)
 
         # 같은 순서로 각 카드 아래에 수량/담기 버튼 배치(3열)
@@ -436,7 +422,7 @@ def shop_page(df: pd.DataFrame):
     if over_budget:
         st.error("예산을 초과했습니다! 일부 물건을 빼거나 수량을 줄여 주세요.")
 
-    # 제출하기 버튼 (예산 초과 시 비활성화) -> 결과 페이지로 이동
+    # 제출하기 → 결과 페이지로 이동
     submitted = st.button("제출하기", type="primary", disabled=over_budget or (total <= 0))
     if submitted:
         st.session_state.submitted = True
@@ -446,7 +432,6 @@ def shop_page(df: pd.DataFrame):
 def result_page():
     st.title(f"✅ 결과 - 미션: {st.session_state.mission}")
 
-    # 안전장치
     if not st.session_state.submitted:
         st.warning("제출 버튼을 누른 경우에만 결과 화면으로 이동할 수 있어요.")
         if st.button("쇼핑 화면으로 돌아가기"):
@@ -454,7 +439,6 @@ def result_page():
             st.rerun()
         return
 
-    # 장바구니 표
     cart = st.session_state.cart
     if not cart:
         st.info("장바구니가 비어 있습니다. 쇼핑 화면으로 돌아가 물건을 담아 주세요.")
@@ -470,10 +454,9 @@ def result_page():
         ]
     ).sort_values("품명")
 
-    # PNG 생성 품질 안정: 사전 이미지 로드 (UI 표시는 HTML 이미지 사용)
+    # PNG 품질 안정: 사전 이미지 로드
     df_items["이미지"] = df_items["이미지url"].apply(lambda u: fetch_image(u, size=(120, 120)))
 
-    # 화면 표시용: 이미지 포함 HTML 테이블
     st.subheader("🧾 구매한 물건")
     _render_cart_table_html(cart)
 
@@ -527,7 +510,6 @@ def result_page():
 
 def main():
     init_state()
-
     try:
         products = load_products("products.csv")
     except Exception as e:
