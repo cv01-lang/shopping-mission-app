@@ -92,8 +92,7 @@ st.markdown(GLOBAL_CSS, unsafe_allow_html=True)
 # st.html 헬퍼: 없으면 markdown 폴백
 def render_html(html: str):
     try:
-        # Streamlit 1.32+ 에서 제공
-        st.html(html)
+        st.html(html)  # Streamlit >= 1.32
     except AttributeError:
         st.markdown(html, unsafe_allow_html=True)
 
@@ -177,6 +176,16 @@ def get_font(prefer_size=32):
             continue
     return ImageFont.load_default()
 
+def _text_wh(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont):
+    """
+    Pillow 10+ 호환: textbbox()로 텍스트 크기 계산, 실패 시 textsize() 폴백
+    """
+    try:
+        left, top, right, bottom = draw.textbbox((0, 0), text, font=font)
+        return (right - left), (bottom - top)
+    except Exception:
+        return draw.textsize(text, font=font)
+
 def make_result_image(mission_title: str, reasons: str, items: pd.DataFrame, total: int, budget: int) -> bytes:
     """
     결과 이미지를 PIL로 생성하여 PNG 바이트로 반환.
@@ -207,7 +216,7 @@ def make_result_image(mission_title: str, reasons: str, items: pd.DataFrame, tot
 
     # 헤더 (상단 중앙 정렬)
     title_text = f"미션: {mission_title}"
-    tw, th = d.textsize(title_text, font=title_font)
+    tw, th = _text_wh(d, title_text, title_font)
     d.text(((w - tw) // 2, padding), title_text, font=title_font, fill=(20, 20, 20))
 
     y = padding + header_h
