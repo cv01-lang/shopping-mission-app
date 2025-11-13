@@ -1,5 +1,7 @@
 import io
 import math
+import os
+from pathlib import Path
 from typing import Dict, Any
 import requests
 import pandas as pd
@@ -156,25 +158,82 @@ def fetch_image(url: str, size=(120, 120)) -> Image.Image:
     canvas.paste(img, ((size[0]-img.width)//2, (size[1]-img.height)//2))
     return canvas
 
-def get_font(prefer_size=32):
+# --------- 폰트 탐색 & 로딩 강화 ----------
+@st.cache_data(show_spinner=False)
+def find_korean_font_path() -> str | None:
     """
-    한글 폰트 우선순위: 프로젝트 내 NanumHumanRegular.ttf 사용 (요청사항)
+    NanumHumanRegular.ttf을 우선적으로 탐색.
+    - st.secrets['KOREAN_FONT_PATH']
+    - 현재 작업 디렉토리, 스크립트 디렉토리, ./fonts, 프로젝트 루트 하위 rglob
+    - 일반 한글 폰트 후보도 보조 탐색
     """
+    # 1) 사용자가 secrets에 지정한 경우
+    try:
+        fp = st.secrets.get("KOREAN_FONT_PATH", None)
+        if fp and Path(fp).is_file():
+            return str(Path(fp).resolve())
+    except Exception:
+        pass
+
+    # 2) 우선 후보들
+    script_dir = Path(__file__).parent.resolve()
+    cwd = Path.cwd().resolve()
     candidates = [
-        "fonts/NanumHumanRegular.ttf",   # 요청 폰트
-        "fonts/NotoSansCJK-Regular.otf",
-        "fonts/NotoSansKR-Regular.otf",
-        "fonts/NanumGothic.ttf",
-        "/System/Library/Fonts/AppleGothic.ttf",
-        "C:/Windows/Fonts/malgun.ttf",
-        "C:/Windows/Fonts/NanumGothic.ttf",
+        script_dir / "fonts" / "NanumHumanRegular.ttf",
+        script_dir / "NanumHumanRegular.ttf",
+        cwd / "fonts" / "NanumHumanRegular.ttf",
+        cwd / "NanumHumanRegular.ttf",
     ]
-    for path in candidates:
+    for p in candidates:
+        if p.is_file():
+            return str(p.resolve())
+
+    # 3) 리포지토리 전체에서 rglob로 파일명 탐색 (비용 적음)
+    root = script_dir
+    for parent in script_dir.parents:
+        # 상위 디렉토리 쪽에 repo 루트가 있을 수 있음
+        if (parent / ".git").exists() or (parent / "requirements.txt").exists():
+            root = parent
+            break
+    try:
+        for p in root.rglob("NanumHumanRegular.ttf"):
+            if p.is_file():
+                return str(p.resolve())
+    except Exception:
+        pass
+
+    # 4) 보조 한글 폰트 후보
+    fallback_candidates = [
+        script_dir / "fonts" / "NotoSansKR-Regular.otf",
+        script_dir / "fonts" / "NotoSansKR-Regular.ttf",
+        cwd / "fonts" / "NotoSansKR-Regular.otf",
+        cwd / "fonts" / "NotoSansKR-Regular.ttf",
+        Path("/System/Library/Fonts/AppleGothic.ttf"),
+        Path("C:/Windows/Fonts/malgun.ttf"),
+        Path("C:/Windows/Fonts/NanumGothic.ttf"),
+    ]
+    for p in fallback_candidates:
+        if p.is_file():
+            return str(p.resolve())
+
+    return None
+
+def get_font(prefer_size=32) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    """
+    한글 폰트: 리포지토리/시스템에서 경로를 찾아 로드. 실패 시 기본 폰트(한글 미지원 가능).
+    """
+    fp = find_korean_font_path()
+    if fp:
         try:
-            return ImageFont.truetype(path, prefer_size)
+            return ImageFont.truetype(fp, prefer_size)
         except Exception:
-            continue
+            pass
+    # 마지막 폴백(한글 깨질 수 있음)
     return ImageFont.load_default()
+
+def font_status() -> str:
+    fp = find_korean_font_path()
+    return fp if fp else "(찾지 못함) 기본 폰트 사용 중 - PNG의 한글이 깨질 수 있어요."
 
 def _text_wh(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont):
     """
@@ -209,6 +268,7 @@ def make_result_image(mission_title: str, reasons: str, items: pd.DataFrame, tot
     img = Image.new("RGB", (w, h), (255, 255, 255))
     d = ImageDraw.Draw(img)
 
+    # ---- 폰트(한글 지원) 로딩
     title_font = get_font(44)
     bold_font = get_font(28)
     text_font = get_font(24)
@@ -311,6 +371,11 @@ MISSIONS = {
 def start_page():
     st.title("🛒 장보기 미션 앱")
     st.subheader("미션을 선택하세요")
+
+    # 폰트 상태 표시 (사이드바)
+    with st.sidebar:
+        st.markdown("#### 폰트 상태")
+        st.code(font_status())
 
     cols = st.columns(len(MISSIONS))
     for i, (m, budget) in enumerate(MISSIONS.items()):
